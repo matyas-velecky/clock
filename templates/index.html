@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hodiny — čas serveru</title>
+<style>
+  :root {
+    --bg: #8aea36;
+    --face: #f7f5f0;
+    --rim: #2c3a47;
+    --hand: #2c3a47;
+    --accent: #d64541;
+    --text: #e8ecef;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1.5rem;
+    background: radial-gradient(circle at 50% 30%, #1c2a38, var(--bg));
+    font-family: "Segoe UI", system-ui, sans-serif;
+    color: var(--text);
+  }
+  h1 { font-weight: 400; letter-spacing: .05em; font-size: 1.4rem; opacity: .85; }
+
+  .clock {
+    width: min(70vmin, 420px);
+    aspect-ratio: 1;
+    filter: drop-shadow(0 12px 30px rgba(0,0,0,.5));
+  }
+
+  .digital {
+    font-variant-numeric: tabular-nums;
+    font-size: clamp(1.6rem, 5vmin, 2.6rem);
+    letter-spacing: .08em;
+  }
+  .date { opacity: .6; font-size: .95rem; }
+</style>
+</head>
+<body>
+  <h1>Aktuální čas serveru</h1>
+
+  <!-- Analogový ciferník (SVG) -->
+  <svg class="clock" viewBox="0 0 200 200" role="img" aria-label="Analogový ciferník">
+    <!-- rám -->
+    <circle cx="100" cy="100" r="98" fill="var(--rim)"/>
+    <circle cx="100" cy="100" r="90" fill="var(--face)"/>
+
+    <!--#index marks se vloží skriptem -->
+    <g id="marks"></g>
+
+    <!-- ručičky -->
+    <line id="hour-hand" x1="100" y1="108" x2="100" y2="55"
+          stroke="var(--hand)" stroke-width="6" stroke-linecap="round"/>
+    <line id="minute-hand" x1="100" y1="112" x2="100" y2="35"
+          stroke="var(--hand)" stroke-width="4" stroke-linecap="round"/>
+    <line id="second-hand" x1="100" y1="118" x2="100" y2="28"
+          stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round"/>
+    <circle cx="100" cy="100" r="5" fill="var(--hand)"/>
+    <circle cx="100" cy="100" r="2.2" fill="var(--accent)"/>
+  </svg>
+
+  <div class="digital" id="digital">--:--:--</div>
+  <div class="date" id="date"></div>
+
+<script>
+  // Čas serveru vykreslený Flaskem jako výchozí bod, pak běží lokálně.
+  const serverIso = "{{ now.isoformat(timespec='milliseconds') }}";
+  const serverTime = new Date(serverIso);
+  const loadTime = performance.now();
+
+  // Posun mezi serverem a klientem (kdyby běžely na různých strojích)
+  let offset = serverTime.getTime() - Date.now();
+
+  function serverNow() { return new Date(Date.now() + offset); }
+
+  // Generování ciferníku: 60 dělení, zvýraznění každého 5., číslice 1–12
+  (function buildDial() {
+    const marks = document.getElementById("marks");
+    const ns = "http://www.w3.org/2000/svg";
+    for (let i = 0; i < 60; i++) {
+      const major = i % 5 === 0;
+      const angle = (i * 6) * Math.PI / 180;
+      const r1 = major ? 78 : 83, r2 = 87;
+      const line = document.createElementNS(ns, "line");
+      line.setAttribute("x1", 100 + r1 * Math.sin(angle));
+      line.setAttribute("y1", 100 - r1 * Math.cos(angle));
+      line.setAttribute("x2", 100 + r2 * Math.sin(angle));
+      line.setAttribute("y2", 100 - r2 * Math.cos(angle));
+      line.setAttribute("stroke", major ? "#2c3a47" : "#9aa5b1");
+      line.setAttribute("stroke-width", major ? 2.5 : 1);
+      marks.appendChild(line);
+    }
+    for (let h = 1; h <= 12; h++) {
+      const angle = (h * 30) * Math.PI / 180;
+      const t = document.createElementNS(ns, "text");
+      t.setAttribute("x", 100 + 66 * Math.sin(angle));
+      t.setAttribute("y", 100 - 66 * Math.cos(angle) + 5);
+      t.setAttribute("text-anchor", "middle");
+      t.setAttribute("font-size", "13");
+      t.setAttribute("font-weight", "600");
+      t.setAttribute("fill", "#2c3a47");
+      t.textContent = h;
+      marks.appendChild(t);
+    }
+  })();
+
+  const hourHand = document.getElementById("hour-hand");
+  const minuteHand = document.getElementById("minute-hand");
+  const secondHand = document.getElementById("second-hand");
+  const digital = document.getElementById("digital");
+  const dateEl = document.getElementById("date");
+
+  function setRotation(el, deg) {
+    el.setAttribute("transform", `rotate(${deg} 100 100)`);
+  }
+
+  function render() {
+    const n = serverNow();
+    const s = n.getSeconds() + n.getMilliseconds() / 1000;
+    const m = n.getMinutes() + s / 60;
+    const h = (n.getHours() % 12) + m / 60;
+
+    setRotation(secondHand, s * 6);
+    setRotation(minuteHand, m * 6);
+    setRotation(hourHand, h * 30);
+
+    const p = x => String(x).padStart(2, "0");
+    digital.textContent = `${p(n.getHours())}:${p(n.getMinutes())}:${p(n.getSeconds())}`;
+    dateEl.textContent = n.toLocaleDateString("cs-CZ", {
+      weekday: "long", year: "numeric", month: "long", day: "numeric"
+    });
+    requestAnimationFrame(render);
+  }
+
+  // Znovu synchronizovat se serverem každých 60 s, aby ručičky nebyly mimo
+  setInterval(async () => {
+    try {
+      const t0 = Date.now();
+      const r = await fetch("/api/time");
+      const d = await r.json();
+      const t1 = Date.now();
+      // NTP-style: čas serveru uprostřed doby přenosu
+      const serverAtMid = new Date(d.iso).getTime() + (t1 - t0) / 2;
+      offset = serverAtMid - t1;
+    } catch (e) { /* server nedostupný — běž dál lokálně */ }
+  }, 60000);
+
+  render();
+</script>
+</body>
+</html>
